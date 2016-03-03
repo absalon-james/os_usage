@@ -15,33 +15,22 @@
 
 import datetime
 
-import iso8601
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 from oslo_utils import timeutils
-import six
-import six.moves.urllib.parse as urlparse
 from webob import exc
 
 from nova.api.openstack import extensions
-from nova.api.openstack import wsgi
 from nova import exception
-from nova.i18n import _
-from nova import objects
 from nova.api.openstack.compute.simple_tenant_usage \
     import SimpleTenantUsageController
 
 
 from nova.db.sqlalchemy import models
 from nova.db.sqlalchemy.api import get_session
-from nova.db.sqlalchemy.api import _exact_instance_filter
-from nova.db.sqlalchemy.api import _instances_fill_metadata
 from nova.db.sqlalchemy.api import _manual_join_columns
 from nova.db.sqlalchemy.api import require_context
 from nova.objects.instance import _expected_cols
-from nova.objects.instance import _make_instance_list
-from nova.objects.instance import InstanceList
-from sqlalchemy import and_
 from sqlalchemy import or_
 from sqlalchemy.orm import aliased
 from sqlalchemy.orm import joinedload
@@ -52,12 +41,26 @@ LOG = logging.getLogger(__name__)
 
 
 @require_context
-def instance_get_active_by_window_joined(context, begin, end=None,
-                                         project_id=None, host=None,
-                                         use_slave=False,
-                                         columns_to_join=None,
-                                         metadata=None):
-    """Return instances and joins that were active during window."""
+def instance_get_active_by_window_joined(
+    context,
+    begin, end=None,
+    project_id=None,
+    host=None,
+    use_slave=False,
+    columns_to_join=None,
+    metadata=None
+):
+    """Simulate bottom most layer.
+
+    :param context: wsgi context
+    :param begin: Datetime
+    :param end: Datetime|None
+    :param project_id: String|None
+    :param host: String|None
+    :param use_slave: Boolean
+    :param columns_to_join: List|None
+    :param metadata: Dict|None
+    """
     if metadata:
         aliases = [aliased(models.InstanceMetadata) for i in metadata]
     else:
@@ -93,9 +96,13 @@ def instance_get_active_by_window_joined(context, begin, end=None,
 
     if metadata:
         for keypair, alias in zip(metadata.items(), aliases):
-            query = query.filter(alias.key == keypair[0]).filter(alias.value == keypair[1])
+            query = query.filter(alias.key == keypair[0])
+            query = query.filter(alias.value == keypair[1])
             query = query.filter(alias.instance_uuid == models.Instance.uuid)
-            query = query.filter(or_(alias.deleted_at == None, alias.deleted_at == models.Instance.deleted_at))
+            query = query.filter(or_(
+                alias.deleted_at == null(),
+                alias.deleted_at == models.Instance.deleted_at
+            ))
 
     query = query.filter(
         models.Instance.instance_type_id == models.InstanceTypes.id
@@ -109,13 +116,8 @@ def instance_get_active_by_window_joined(context, begin, end=None,
         instances.append(dict(instance))
         flavor = tup[1]
         flavors.append(dict(flavor))
-        metas = tup[2:]
-        LOG.debug("{0} - flavor: {1}".format(instance.hostname, flavor.name))
-        for m in metas:
-            LOG.debug("{0}: {1}".format(m.key, m.value))
 
     return (instances, flavors)
-    #return _instances_fill_metadata(context, query.all(), manual_joins)
 
 
 ALIAS = "os-complex-tenant-usage"
@@ -159,15 +161,10 @@ class ComplexTenantUsageController(SimpleTenantUsageController):
                 # NOTE(mriedem): Instance object DateTime fields are
                 # timezone-aware so convert using isotime.
                 terminated_at = timeutils.parse_isotime(terminated_at)
-            if terminated_at.tzinfo is None or terminated_at.tzinfo.utcoffset(terminated_at) is None:
-                LOG.debug("terminated at is naive")
-            if period_start.tzinfo is None or period_start.tzinfo.utcoffset(period_start) is None:
-                LOG.debug("period_start is naive")
 
         if launched_at is not None:
             if not isinstance(launched_at, datetime.datetime):
                 launched_at = timeutils.parse_isotime(launched_at)
-
 
         if terminated_at and terminated_at < period_start:
             return 0
@@ -192,17 +189,27 @@ class ComplexTenantUsageController(SimpleTenantUsageController):
             # instance hasn't launched, so no charge
             return 0
 
-    def _tenant_usages_for_period(self, context, period_start,
-                                  period_stop, tenant_id=None,
-                                  detailed=True, metadata=None):
+    def _tenant_usages_for_period(
+        self,
+        context,
+        period_start, period_stop,
+        tenant_id=None,
+        detailed=True,
+        metadata=None
+    ):
+        """Gets instance usages for period by metadata
 
+        :param context: wsgi context
+        :param period_start: Datetime
+        :param period_stop: Datetime
+        :param tenant_id: String|None
+        :param detailed: Boolean
+        :param metadata: Dict|None
+        """
         instances, flavors = self._get_active_by_window_joined(
             context, period_start, period_stop, tenant_id,
             expected_attrs=['flavor'], metadata=metadata
         )
-        import pprint
-        LOG.debug("\n{0}".format(pprint.pformat(instances)))
-
         rval = {}
 
         for instance, flavor in zip(instances, flavors):
@@ -227,7 +234,8 @@ class ComplexTenantUsageController(SimpleTenantUsageController):
             # NOTE(mriedem): We need to normalize the start/end times back
             # to timezone-naive so the response doesn't change after the
             # conversion to objects.
-            info['started_at'] = timeutils.normalize_time(instance['launched_at'])
+            info['started_at'] = \
+                timeutils.normalize_time(instance['launched_at'])
 
             info['ended_at'] = (
                 timeutils.normalize_time(instance['terminated_at']) if
@@ -273,10 +281,16 @@ class ComplexTenantUsageController(SimpleTenantUsageController):
 
         return rval.values()
 
-    def _get_active_by_window_joined(self, context, begin, end=None,
-                                     project_id=None, host=None,
-                                     expected_attrs=None,
-                                     use_slave=False, metadata=None):
+    def _get_active_by_window_joined(
+        self,
+        context,
+        begin, end=None,
+        project_id=None,
+        host=None,
+        expected_attrs=None,
+        use_slave=False,
+        metadata=None
+    ):
         """Get instances and joins active during a certain time window.
 
         **Mirrors objects.InstanceList.get_active_by_window_joined**
@@ -302,10 +316,17 @@ class ComplexTenantUsageController(SimpleTenantUsageController):
                                                   use_slave=use_slave,
                                                   metadata=metadata)
 
-    def __get_active_by_window_joined(self, context, begin, end=None,
-                                      project_id=None, host=None,
-                                      expected_attrs=None,
-                                      use_slave=False, metadata=None):
+    def __get_active_by_window_joined(
+        self,
+        context,
+        begin, end=None,
+        project_id=None,
+        host=None,
+        expected_attrs=None,
+        use_slave=False,
+        metadata=None
+    ):
+        """Second to bottom most database layer"""
         # NOTE(mriedem): We need to convert the begin/end timestamp strings
         # to timezone-aware datetime objects for the DB API call.
         begin = timeutils.parse_isotime(begin)
@@ -314,8 +335,6 @@ class ComplexTenantUsageController(SimpleTenantUsageController):
             context, begin, end, project_id, host,
             columns_to_join=_expected_cols(expected_attrs), metadata=metadata)
         return db_inst_list
-        #return _make_instance_list(context, InstanceList(), db_inst_list,
-        #                           expected_attrs)
 
 
 class ComplexTenantUsage(extensions.V21APIExtensionBase):
