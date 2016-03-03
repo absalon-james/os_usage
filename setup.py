@@ -2,6 +2,8 @@ from setuptools import setup
 
 from os_usage.meta import version
 
+nova_usage_alias = 'complex-tenant-usage'
+nova_usage_class = 'os_usage.nova.complex_tenant_usage:ComplexTenantUsage'
 
 setup(
     name="os_usage",
@@ -14,6 +16,6 @@ setup(
                       "resource usage."),
     entry_points="""
     [nova.api.v21.extensions]
-    complex-tenant-usage = os_usage.nova.complex_tenant_usage:ComplexTenantUsage
-    """
+    {0} = {1}
+    """.format(nova_usage_alias, nova_usage_class)
 )
