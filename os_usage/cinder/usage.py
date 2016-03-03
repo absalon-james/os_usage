@@ -21,15 +21,12 @@ import iso8601
 import six
 import six.moves.urllib.parse as urlparse
 
-from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 from webob import exc
 
-from cinder import consistencygroup as consistencygroupAPI
 from cinder import exception
-from cinder import volume as cinder_volume
 from cinder.api.openstack import wsgi
 from cinder.api.v2.views import volumes as volume_views
 from cinder.db.sqlalchemy import models
@@ -40,18 +37,6 @@ from sqlalchemy import or_
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql import null
 
-
-query_volume_filters_opt = cfg.ListOpt('query_volume_filters',
-                                       default=['name', 'status', 'metadata',
-                                                'availability_zone'],
-                                       help="Volume filter options which "
-                                            "non-admin user could use to "
-                                            "query volumes. Default values "
-                                            "are: ['name', 'status', "
-                                            "'metadata', 'availability_zone']")
-
-CONF = cfg.CONF
-CONF.register_opt(query_volume_filters_opt)
 
 LOG = logging.getLogger(__name__)
 SCHEDULER_HINTS_NAMESPACE =\
@@ -70,17 +55,19 @@ def parse_strtime(dstr, fmt):
 
 
 class UsagesController(wsgi.Controller):
-    """The Volumes API controller for the OpenStack API."""
+    """The Usages API controller for the OpenStack API."""
 
     _view_builder_class = volume_views.ViewBuilder
 
     def __init__(self, ext_mgr):
-        self.volume_api = cinder_volume.API()
-        self.consistencygroup_api = consistencygroupAPI.API()
         self.ext_mgr = ext_mgr
         super(UsagesController, self).__init__()
 
     def _parse_datetime(self, dtstr):
+        """Parse a datetimestring
+
+        :param dtstr: String containing datetime
+        """
         if not dtstr:
             value = timeutils.utcnow()
         elif isinstance(dtstr, datetime.datetime):
@@ -107,6 +94,10 @@ class UsagesController(wsgi.Controller):
         return value
 
     def _get_datetime_range(self, req):
+        """Gets the datetime range from the request.
+
+        :param req: Dict
+        """
         qs = req.environ.get('QUERY_STRING', '')
         env = urlparse.parse_qs(qs)
         # NOTE(lzyeval): env.get() always returns a list
@@ -122,7 +113,7 @@ class UsagesController(wsgi.Controller):
         return (period_start, period_stop, detailed)
 
     def index(self, req):
-        """Returns a summary list of volumes."""
+        """Returns a dictionary of volume usages."""
         context = req.environ['cinder.context']
         metadata = req.GET.get('metadata', '{}')
         metadata = jsonutils.loads(metadata)
@@ -136,14 +127,8 @@ class UsagesController(wsgi.Controller):
         if period_stop > now:
             period_stop = now
 
-        LOG.debug("period_start: {0}".format(period_start))
-        LOG.debug("period_stop: {0}".format(period_stop))
-        LOG.debug("metadata: {0}".format(metadata))
-
         usages = self._get_volumes(context, period_start, period_stop,
                                    detailed=True, metadata=metadata)
-        LOG.debug("Got usages -> returning")
-
         return {"tenant_usages": usages}
 
     def _hours_for(self, volume, period_start, period_stop):
@@ -188,8 +173,14 @@ class UsagesController(wsgi.Controller):
 
     def _volume_api_get_all(self, context, period_start, period_stop,
                             tenant_id, metadata=None):
-        """Simulate the volume_api.get_active_by_window()"""
-        LOG.debug("Made it to _volume_api_get_all")
+        """Simulate the volume_api.get_active_by_window()
+
+        :param context: wsgi context
+        :param period_start: Datetime
+        :param period_stop: Datetime
+        :param tenant_id: String
+        :param metadata: Dict|None
+        """
         # Convert the datetime objects to strings for the remote call
         period_start = timeutils.isotime(period_start)
         period_stop = timeutils.isotime(period_stop)
@@ -203,8 +194,14 @@ class UsagesController(wsgi.Controller):
     def __get_active_by_window_metadata(self, context, period_start,
                                         period_stop, project_id,
                                         metadata=None):
-        """Simulate second to bottom layer"""
-        LOG.debug("Made it to __get_active_by_window_metadata")
+        """Simulate second to bottom layer
+
+        :param context: wsgi context
+        :param period_start: String
+        :param period_stop: String
+        :param project_id: String
+        :param metadata: Dict|None
+        """
         period_start = timeutils.parse_isotime(period_start)
         period_stop = timeutils.parse_isotime(period_stop)
         db_volume_list = self.___get_active_by_window_metadata(
@@ -220,13 +217,19 @@ class UsagesController(wsgi.Controller):
                                          project_id=None,
                                          metadata=None,
                                          use_slave=False):
-        """Simulate bottom most layer"""
-        LOG.debug("Made it to ___get_active_by_window_metadata")
+        """Simulate bottom most layer
+
+        :param context: wsgi context
+        :param period_start: Datetime
+        :param period_stop: Datetime
+        :param project_id: String|None
+        :param metadata: Dict|None
+        :param use_slave: Boolean
+        """
         if metadata:
             aliases = [aliased(models.VolumeMetadata) for i in metadata]
         else:
             aliases = []
-        LOG.debug("I have {0} aliases".format(len(aliases)))
         session = get_session(use_slave=use_slave)
         query = session.query(
             models.Volume,
@@ -244,8 +247,6 @@ class UsagesController(wsgi.Controller):
 
         if metadata:
             for keypair, alias in zip(metadata.items(), aliases):
-                LOG.debug("Searching for {0}: {1}".format(
-                          keypair[0], keypair[1]))
                 query = query.filter(alias.key == keypair[0])
                 query = query.filter(alias.value == keypair[1])
                 query = query.filter(alias.volume_id == models.Volume.id)
@@ -259,15 +260,9 @@ class UsagesController(wsgi.Controller):
             # If no metadata filters, then no aliases.
             if aliases:
                 volume = tup[0]
-                metas = tup[1:]
             else:
                 volume = tup
-                metas = []
             volumes.append(dict(volume))
-            LOG.debug("{0}".format(volume.display_name))
-            for m in metas:
-                LOG.debug("{0}: {1}".format(m.key, m.value))
-        LOG.debug("Returning {0} volumes".format(len(volumes)))
         return volumes
 
     def _get_volumes(self, context, period_start, period_stop,
