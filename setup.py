@@ -10,7 +10,13 @@ setup(
     version=version,
     author="james absalon",
     author_email="james.absalon@rackspace.com",
-    packages=['os_usage'],
+    packages=[
+        'os_usage',
+        'os_usage.common',
+        'os_usage.glance',
+        'os_usage.cinder',
+        'os_usage.nova'
+    ],
     package_data={'os_usage': ['os_usage/*']},
     long_description=("Set of plugins for reporting on openstack "
                       "resource usage."),
