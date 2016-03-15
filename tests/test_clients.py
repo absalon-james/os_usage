@@ -3,6 +3,7 @@ import unittest
 
 from os_usage import clients
 
+
 class FakeLoader():
     def load_from_options(
         self,
@@ -15,6 +16,7 @@ class FakeLoader():
         return self
 
 FAKE_LOADER = FakeLoader()
+
 
 class TestClients(unittest.TestCase):
     """Unit tests for the client manager"""
@@ -61,7 +63,7 @@ class TestClients(unittest.TestCase):
         """Tests get_session without an existing session."""
         clients = self.create_manager()
         self.assertIsNone(clients.session)
-        session = clients.get_session()
+        clients.get_session()
         mocked_loader.assert_called_once_with('password')
         mocked_session.assert_called_once_with(auth=FAKE_LOADER)
         self.assertEquals(clients.session, 'session')
@@ -89,7 +91,7 @@ class TestClients(unittest.TestCase):
         self.assertIsNone(clients.nova)
         clients.session = 'session'
         version = '3'
-        nova = clients.get_nova(version=version)
+        clients.get_nova(version=version)
         mocked_client.assert_called_once_with(version, session='session')
 
     def test_get_glance_existing(self):
@@ -109,7 +111,7 @@ class TestClients(unittest.TestCase):
         self.assertIsNone(clients.glance)
         clients.session = 'session'
         version = '3'
-        glance = clients.get_glance(version=version)
+        clients.get_glance(version=version)
         mocked_client.assert_called_once_with(version, session='session')
 
     def test_get_cinder_existing(self):
@@ -129,5 +131,5 @@ class TestClients(unittest.TestCase):
         self.assertIsNone(clients.cinder)
         clients.session = 'session'
         version = '3'
-        cinder = clients.get_cinder(version=version)
+        clients.get_cinder(version=version)
         mocked_client.assert_called_once_with(version, session='session')

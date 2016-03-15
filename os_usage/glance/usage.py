@@ -168,8 +168,17 @@ class UsagesController(object):
                 rval[info['project_id']] = summary
 
             summary = rval[info['project_id']]
+
+            # Its possible that image has been created without any uploaded
+            # data. Assume 0 if this is the case.
+            size = info.get('size', None)
+            if size is None:
+                size = 0
+
+            LOG.debug("Image size is {0}".format(size))
+
             summary['total_gb_hours'] += (
-                float(info['size']) / 1024 / 1024 / 1024 *
+                float(size) / 1024 / 1024 / 1024 *
                 info['hours']
             )
             summary['total_hours'] += info['hours']
