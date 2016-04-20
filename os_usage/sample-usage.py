@@ -5,17 +5,19 @@ from common.usages import Usages
 
 
 kwargs = {
-    'auth_url': '<some auth_url>',
-    'username': '<a username>',
-    'password': '<a password>',
-    'project_id': '<a tenant id>'
+    'auth_url': 'someurl',
+    'username': 'someusername',
+    'password': 'somepassword',
+    'project_id': 'someprojectid',
+    'user_domain_name': 'Default',
+    'project_domain_name': 'Default'
 }
 
 clients = ClientManager(**kwargs)
 end = datetime.datetime.now()
 start = end - datetime.timedelta(days=21)
 
-usages = Usages(clients)
+usages = Usages(clients, glance=True, cinder=True, nova=True)
 usages.get_usages(start, end)
 
 for tenant_id, tenant_usage in usages:
